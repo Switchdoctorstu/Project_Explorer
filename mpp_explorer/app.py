@@ -12,7 +12,7 @@ from .analysis import build_summary_text
 from .core import MpxjSession, flatten_exception
 from .gui import PropertyGrid, ScrollableTree
 from .model import Project, ProjectExtractor, Task
-from .reporting import export_threejs_visualization, export_tree_to_csv
+from .reporting import export_static_viewer, export_tree_to_csv, open_dynamic_viewer
 
 APP_TITLE = "MPP Programme Explorer"
 JAR_NAME = "projectlibre-1.9.8.jar"
@@ -948,12 +948,14 @@ class ProgrammeExplorer:
             return
 
         source_name = self.current_file.stem if self.current_file else "programme"
-        output = self.reports_dir() / f"{source_name}_3d_visualisation_preview.html"
 
         try:
-            export_threejs_visualization(self.project, output)
-            self.status_text.set(f"Preview ready: {output}")
-            webbrowser.open(output.resolve().as_uri())
+            url = open_dynamic_viewer(
+                self.project,
+                self.reports_dir(),
+                filename=f"{source_name}_3d_preview.html",
+            )
+            self.status_text.set(f"Preview ready: {url}")
         except Exception as exception:
             messagebox.showerror("3D preview failed", str(exception))
 
@@ -975,7 +977,7 @@ class ProgrammeExplorer:
             return
 
         try:
-            output = export_threejs_visualization(self.project, filename)
+            output = export_static_viewer(self.project, filename)
             self.status_text.set(f"Exported {output}")
 
             open_now = messagebox.askyesno(
