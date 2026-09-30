@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import sys
 import webbrowser
+import csv
+import traceback
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import jpype
 
-from .analysis import build_summary_text
+from .analysis import build_summary_text, analyse_schedule
 from .core import MpxjSession, flatten_exception
 from .gui import PropertyGrid, ScrollableTree
 from .model import Project, ProjectExtractor, Task
-from .reporting import export_static_viewer, export_tree_to_csv, open_dynamic_viewer
+from .reporting import (
+    export_static_gantt,
+    export_static_viewer,
+    export_tree_to_csv,
+    open_dynamic_gantt,
+    open_dynamic_viewer,
+)
 
 APP_TITLE = "MPP Programme Explorer"
 JAR_NAME = "projectlibre-1.9.8.jar"
@@ -46,8 +54,33 @@ class ProgrammeExplorer:
         self._build_menu()
         self._build_interface()
 
+        self.root.report_callback_exception = self._handle_tk_callback_exception
         self.root.protocol("WM_DELETE_WINDOW", self.close_application)
         self.root.after(50, self.start_jvm)
+
+    def _log_exception(self, context: str, exception: BaseException):
+        print(f"\n[{APP_TITLE}] {context}", file=sys.stderr)
+        traceback.print_exception(type(exception), exception, exception.__traceback__, file=sys.stderr)
+
+    def _show_error(self, title: str, summary: str, exception: BaseException | None = None):
+        if exception is not None:
+            self._log_exception(title, exception)
+            details = flatten_exception(exception)
+            messagebox.showerror(
+                title,
+                f"{summary}\n\n{details}\n\nSee console output for the full traceback.",
+            )
+            return
+        messagebox.showerror(title, summary)
+
+    def _handle_tk_callback_exception(self, exc_type, exc_value, exc_traceback):
+        print(f"\n[{APP_TITLE}] Unhandled Tkinter callback exception", file=sys.stderr)
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+        self._show_error(
+            "Unexpected application error",
+            "An unexpected error occurred while handling a UI action.",
+            exc_value,
+        )
 
     def _configure_style(self):
         style = ttk.Style()
@@ -70,8 +103,14 @@ class ProgrammeExplorer:
         file_menu.add_command(label="Export task register...", command=self.export_tasks_csv)
         file_menu.add_command(label="Export resource register...", command=self.export_resources_csv)
         file_menu.add_command(label="Export dependency register...", command=self.export_dependencies_csv)
-        file_menu.add_command(label="Open 3D preview", command=self.open_3d_preview)
-        file_menu.add_command(label="Export 3D visualisation...", command=self.export_3d_visualisation)
+        file_menu.add_separator()
+        file_menu.add_command(label="Open 3D Network preview", command=self.open_3d_network_preview)
+        file_menu.add_command(label="Export 3D Network visualisation...", command=self.export_3d_network_visualisation)
+        file_menu.add_command(label="Open 3D Gantt preview", command=self.open_3d_gantt_preview)
+        file_menu.add_command(label="Export 3D Gantt visualisation...", command=self.export_3d_gantt_visualisation)
+        file_menu.add_separator()
+        file_menu.add_command(label="Export schedule analysis (CSV)...", command=self.export_schedule_analysis_csv)
+        file_menu.add_command(label="Export bottleneck report (CSV)...", command=self.export_bottleneck_report_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.close_application)
 
@@ -106,8 +145,9 @@ class ProgrammeExplorer:
         ttk.Button(toolbar, text="Expand All", command=self.expand_all_tasks).pack(side="left", padx=3)
         ttk.Button(toolbar, text="Collapse All", command=self.collapse_all_tasks).pack(side="left", padx=3)
         ttk.Button(toolbar, text="Export Tasks", command=self.export_tasks_csv).pack(side="left", padx=3)
-        ttk.Button(toolbar, text="3D Preview", command=self.open_3d_preview).pack(side="left", padx=3)
-        ttk.Button(toolbar, text="3D View", command=self.export_3d_visualisation).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="3D Network", command=self.open_3d_network_preview).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="3D Gantt", command=self.open_3d_gantt_preview).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="Bottlenecks", command=self.export_bottleneck_report_csv).pack(side="left", padx=3)
 
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=10)
 
@@ -404,12 +444,12 @@ class ProgrammeExplorer:
             self.status_text.set(f"Ready. MPXJ loaded using Java {self.session.java_version}")
         except Exception as exception:
             self.status_text.set("JVM initialisation failed")
-            messagebox.showerror(
+            self._show_error(
                 "Java / MPXJ error",
                 "The programme explorer could not initialise MPXJ.\n\n"
-                f"{flatten_exception(exception)}\n\n"
                 "Confirm that JDK 21 is active and that "
                 f"{JAR_NAME} is beside this Python script.",
+                exception,
             )
 
     def open_mpp(self):
@@ -443,9 +483,10 @@ class ProgrammeExplorer:
         except Exception as exception:
             self.project = None
             self.status_text.set("Programme load failed")
-            messagebox.showerror(
+            self._show_error(
                 "Could not open programme",
-                f"The selected file could not be read.\n\n{flatten_exception(exception)}",
+                "The selected file could not be read.",
+                exception,
             )
 
     def refresh_all_views(self):
@@ -928,7 +969,7 @@ class ProgrammeExplorer:
             self.status_text.set(f"Exported {filename}")
             messagebox.showinfo("Export complete", f"The register was exported successfully.\n\n{filename}")
         except Exception as exception:
-            messagebox.showerror("Export failed", str(exception))
+            self._show_error("Export failed", "The register export failed.", exception)
 
     def export_tasks_csv(self):
         source_name = self.current_file.stem if self.current_file else "programme"
@@ -942,7 +983,131 @@ class ProgrammeExplorer:
         source_name = self.current_file.stem if self.current_file else "programme"
         self.export_component_csv(self.dependency_tree, f"{source_name}_dependencies.csv")
 
-    def open_3d_preview(self):
+    def _export_rows_csv(self, default_filename: str, headers: list[str], rows: list[list[object]]):
+        if self.project is None:
+            messagebox.showwarning("No programme", "Open an MPP file before exporting.")
+            return
+
+        filename = filedialog.asksaveasfilename(
+            title="Export CSV",
+            initialdir=str(self.reports_dir()),
+            initialfile=default_filename,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+
+        if not filename:
+            return
+
+        try:
+            with open(filename, "w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(headers)
+                writer.writerows(rows)
+            self.status_text.set(f"Exported {filename}")
+            messagebox.showinfo("Export complete", f"The CSV export completed successfully.\n\n{filename}")
+        except Exception as exception:
+            self._show_error("Export failed", "The CSV export failed.", exception)
+
+    def export_schedule_analysis_csv(self):
+        if self.project is None:
+            messagebox.showwarning("No programme", "Open an MPP file before exporting.")
+            return
+
+        analysis = analyse_schedule(self.project)
+        headers = [
+            "Task Unique ID",
+            "Task ID",
+            "Task Name",
+            "Early Start",
+            "Early Finish",
+            "Late Start",
+            "Late Finish",
+            "Total Float (days)",
+            "Free Float (days)",
+            "Critical",
+            "Near Critical",
+            "Constraint Type",
+            "Constraint Date",
+            "Unresolved Constraint",
+            "Cycle Participant",
+        ]
+
+        rows: list[list[object]] = []
+        for task in sorted(self.project.tasks, key=lambda item: item.unique_id):
+            metrics = analysis.task_metrics.get(task.unique_id)
+            if metrics is None:
+                continue
+            rows.append(
+                [
+                    task.unique_id,
+                    task.id,
+                    task.name,
+                    metrics.early_start,
+                    metrics.early_finish,
+                    metrics.late_start,
+                    metrics.late_finish,
+                    metrics.total_float_days,
+                    metrics.free_float_days,
+                    "Yes" if metrics.is_critical else "No",
+                    "Yes" if metrics.is_near_critical else "No",
+                    metrics.constraint_type,
+                    metrics.constraint_date,
+                    "Yes" if metrics.unresolved_constraint else "No",
+                    "Yes" if metrics.cycle_participant else "No",
+                ]
+            )
+
+        source_name = self.current_file.stem if self.current_file else "programme"
+        self._export_rows_csv(f"{source_name}_schedule_analysis.csv", headers, rows)
+
+    def export_bottleneck_report_csv(self):
+        if self.project is None:
+            messagebox.showwarning("No programme", "Open an MPP file before exporting.")
+            return
+
+        analysis = analyse_schedule(self.project)
+        task_by_id = {task.unique_id: task for task in self.project.tasks}
+
+        headers = [
+            "Rank",
+            "Task Unique ID",
+            "Task ID",
+            "Task Name",
+            "Bottleneck Score",
+            "Criticality",
+            "Float",
+            "Fan",
+            "Resource",
+            "Cost",
+            "Duration",
+            "Constraint",
+        ]
+
+        rows: list[list[object]] = []
+        for rank, item in enumerate(analysis.top_bottlenecks, start=1):
+            task = task_by_id.get(item.unique_id)
+            rows.append(
+                [
+                    rank,
+                    item.unique_id,
+                    task.id if task else "",
+                    task.name if task else "",
+                    item.score,
+                    item.components.get("criticality", 0.0),
+                    item.components.get("float", 0.0),
+                    item.components.get("fan", 0.0),
+                    item.components.get("resource", 0.0),
+                    item.components.get("cost", 0.0),
+                    item.components.get("duration", 0.0),
+                    item.components.get("constraint", 0.0),
+                ]
+            )
+
+        source_name = self.current_file.stem if self.current_file else "programme"
+        self._export_rows_csv(f"{source_name}_bottlenecks.csv", headers, rows)
+
+    def open_3d_network_preview(self):
         if self.project is None:
             messagebox.showwarning("No programme", "Open an MPP file before creating a visualisation.")
             return
@@ -957,9 +1122,9 @@ class ProgrammeExplorer:
             )
             self.status_text.set(f"Preview ready: {url}")
         except Exception as exception:
-            messagebox.showerror("3D preview failed", str(exception))
+            self._show_error("3D preview failed", "The 3D Network preview could not be generated.", exception)
 
-    def export_3d_visualisation(self):
+    def export_3d_network_visualisation(self):
         if self.project is None:
             messagebox.showwarning("No programme", "Open an MPP file before creating a visualisation.")
             return
@@ -987,7 +1152,60 @@ class ProgrammeExplorer:
             if open_now:
                 webbrowser.open(output.resolve().as_uri())
         except Exception as exception:
-            messagebox.showerror("Visualisation export failed", str(exception))
+            self._show_error("Visualisation export failed", "The 3D Network visualisation export failed.", exception)
+
+    def open_3d_gantt_preview(self):
+        if self.project is None:
+            messagebox.showwarning("No programme", "Open an MPP file before creating a visualisation.")
+            return
+
+        source_name = self.current_file.stem if self.current_file else "programme"
+
+        try:
+            url = open_dynamic_gantt(
+                self.project,
+                self.reports_dir(),
+                filename=f"{source_name}_3d_gantt_preview.html",
+            )
+            self.status_text.set(f"3D Gantt preview ready: {url}")
+        except Exception as exception:
+            self._show_error("3D Gantt preview failed", "The 3D Gantt preview could not be generated.", exception)
+
+    def export_3d_gantt_visualisation(self):
+        if self.project is None:
+            messagebox.showwarning("No programme", "Open an MPP file before creating a visualisation.")
+            return
+
+        source_name = self.current_file.stem if self.current_file else "programme"
+        filename = filedialog.asksaveasfilename(
+            title="Save 3D Gantt visualisation",
+            initialdir=str(self.reports_dir()),
+            initialfile=f"{source_name}_3d_gantt_visualisation.html",
+            defaultextension=".html",
+            filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
+        )
+
+        if not filename:
+            return
+
+        try:
+            output = export_static_gantt(self.project, filename)
+            self.status_text.set(f"Exported {output}")
+            open_now = messagebox.askyesno(
+                "3D Gantt visualisation exported",
+                f"The 3D Gantt visualisation was created successfully.\n\n{output}\n\nOpen it now in your browser?",
+            )
+            if open_now:
+                webbrowser.open(output.resolve().as_uri())
+        except Exception as exception:
+            self._show_error("3D Gantt export failed", "The 3D Gantt visualisation export failed.", exception)
+
+    # Backwards-compatible method names kept for existing bindings.
+    def open_3d_preview(self):
+        self.open_3d_network_preview()
+
+    def export_3d_visualisation(self):
+        self.export_3d_network_visualisation()
 
     def show_environment_information(self):
         lines = [

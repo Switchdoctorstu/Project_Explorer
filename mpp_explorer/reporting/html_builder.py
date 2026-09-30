@@ -16,9 +16,9 @@ HTML_TEMPLATE = """<!doctype html>
   <title>Programme 3D Visualisation</title>
   <style>
     :root {{
-      --bg-a: #09111f;
-      --bg-b: #120e2b;
-      --bg-c: #1b2b46;
+      --bg-a: #11233f;
+      --bg-b: #1a1f44;
+      --bg-c: #2b4a75;
       --panel: rgba(10, 16, 29, 0.78);
       --panel-border: rgba(180, 210, 255, 0.22);
       --text: #e9f1ff;
@@ -33,7 +33,7 @@ HTML_TEMPLATE = """<!doctype html>
       --contains: #8ea3bb;
     }}
     * {{ box-sizing: border-box; }}
-    html, body {{ margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at 20% 20%, var(--bg-c), var(--bg-a) 45%, #05080f 100%); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }}
+    html, body {{ margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at 20% 20%, var(--bg-c), var(--bg-a) 45%, #08101d 100%); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }}
     #view {{ position: fixed; inset: 0; }}
     #hud {{
       position: fixed;
@@ -148,7 +148,7 @@ HTML_TEMPLATE = """<!doctype html>
     }};
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x04070d, 0.0028);
+    scene.fog = new THREE.FogExp2(0x18263a, 0.0016);
 
     const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 8000);
     camera.position.set(0, 120, 360);
@@ -157,6 +157,8 @@ HTML_TEMPLATE = """<!doctype html>
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.14;
     container.appendChild(renderer.domElement);
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -165,20 +167,20 @@ HTML_TEMPLATE = """<!doctype html>
     controls.minDistance = 30;
     controls.maxDistance = 2000;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.58);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.86);
     scene.add(ambient);
 
-    const keyLight = new THREE.DirectionalLight(0x9cc6ff, 1.0);
+    const keyLight = new THREE.DirectionalLight(0xb6d8ff, 1.22);
     keyLight.position.set(200, 320, 180);
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x88ffd7, 0.45);
+    const rimLight = new THREE.DirectionalLight(0x9effde, 0.72);
     rimLight.position.set(-220, -120, -180);
     scene.add(rimLight);
 
     const starField = new THREE.Points(
       new THREE.BufferGeometry(),
-      new THREE.PointsMaterial({{ color: 0x95bfff, size: 1.2, transparent: true, opacity: 0.55 }})
+      new THREE.PointsMaterial({{ color: 0xb5d4ff, size: 1.2, transparent: true, opacity: 0.62 }})
     );
     const stars = [];
     for (let i = 0; i < 1500; i += 1) {{
@@ -208,7 +210,7 @@ HTML_TEMPLATE = """<!doctype html>
         metalness: 0.28,
         roughness: 0.36,
         emissive: kindColor[node.kind] ?? 0x222222,
-        emissiveIntensity: 0.12,
+        emissiveIntensity: 0.18,
       }});
       const mesh = new THREE.Mesh(geometry, material);
 
@@ -301,7 +303,7 @@ HTML_TEMPLATE = """<!doctype html>
         const diff = new THREE.Vector3().subVectors(b.mesh.position, a.mesh.position);
         const dist = Math.max(1, diff.length());
 
-        const targetLength = e.edge.kind === 'dependency' ? 78 : e.edge.kind === 'assignment' ? 66 : 58;
+        const targetLength = e.edge.kind === 'dependency' ? 70 : e.edge.kind === 'assignment' ? 60 : 52;
         const stretch = dist - targetLength;
         diff.normalize().multiplyScalar(stretch * spring);
 
