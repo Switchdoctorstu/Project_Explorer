@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpp-programme-explorer"
+version = "0.1.0"
+description = "Desktop explorer for Microsoft Project plans with CSV and 3D visualisation export"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+	"JPype1>=1.5.0,<2.0.0",
+]
+
+[tool.setuptools.package-data]
+"mpp_explorer.reporting" = ["assets/*.js"]
